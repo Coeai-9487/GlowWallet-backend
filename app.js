@@ -184,6 +184,31 @@ const findRowById = async (sheetRange, idColumn, targetId) => {
 };
 
 /**
+ * 在原始rows中找出指定id的列索引 (用於同步查詢)
+ * 回傳 { rowIndex, rowData } 或 null
+ */
+const findRowByIDInData = (rawValues, id, columns) => {
+  if (!rawValues || rawValues.length < 2) return null;
+
+  const [header, ...dataRows] = rawValues;
+  const idIndex = header.indexOf("id");
+  if (idIndex === -1) return null;
+
+  const normalizedTarget = (id ?? "").toString().trim();
+  for (let i = 0; i < dataRows.length; i++) {
+    const rowId = (dataRows[i][idIndex] ?? "").toString().trim();
+    if (rowId === normalizedTarget) {
+      const rowData = header.reduce((acc, key, idx) => {
+        acc[key] = dataRows[i][idx] ?? "";
+        return acc;
+      }, {});
+      return { rowIndex: i + 2 }; // +2: 1 for 1-based, 1 for header
+    }
+  }
+  return null;
+};
+
+/**
  * 更新指定列的資料
  */
 const updateRow = async (sheetName, rowIndex, columns, payload) => {
@@ -947,7 +972,7 @@ app.delete("/api/health/:id", requireAuth, async (req, res) => {
     });
 
     const rawValues = response.data.values || [];
-    const found = findRowByID(rawValues, id, HEALTH_COLUMNS);
+    const found = findRowByIDInData(rawValues, id, HEALTH_COLUMNS);
 
     if (!found) {
       return res.status(404).json({ message: "健康監測記錄不存在" });
