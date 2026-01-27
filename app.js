@@ -64,6 +64,7 @@ const API_ENDPOINTS = [
   { method: "PUT", path: "/api/budget", description: "更新預算" },
   { method: "GET", path: "/api/health", description: "取得所有健康監測記錄" },
   { method: "POST", path: "/api/health", description: "新增健康監測記錄（血糖或血壓）" },
+  { method: "DELETE", path: "/api/health/:id", description: "刪除健康監測記錄" },
 ];
 
 /**
@@ -916,6 +917,33 @@ app.post("/api/health", requireAuth, async (req, res) => {
   } catch (error) {
     console.error("Failed to create health record:", error);
     res.status(500).json({ message: "無法保存健康監測記錄", error: error.message });
+  }
+});
+
+// DELETE /api/health/:id - 刪除健康監測記錄
+app.delete("/api/health/:id", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const sheets = getSheetsClient();
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SHEET_ID,
+      range: HEALTH_SHEET_RANGE,
+    });
+
+    const rawValues = response.data.values || [];
+    const found = findRowByID(rawValues, id, HEALTH_COLUMNS);
+
+    if (!found) {
+      return res.status(404).json({ message: "健康監測記錄不存在" });
+    }
+
+    await deleteRow(sheets, "health", found.rowIndex);
+
+    res.json({ message: "健康監測記錄已刪除" });
+  } catch (error) {
+    console.error("Failed to delete health record:", error);
+    res.status(500).json({ message: "無法刪除健康監測記錄", error: error.message });
   }
 });
 
