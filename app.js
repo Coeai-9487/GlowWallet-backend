@@ -39,7 +39,7 @@ const DEFAULT_BUDGET = {
   id: "1",
   amount: "0",
 };
-const HEALTH_SHEET_RANGE = process.env.GOOGLE_HEALTH_RANGE || "'health'!A:H";
+const HEALTH_SHEET_RANGE = process.env.GOOGLE_HEALTH_RANGE || "'health'!A:I";
 const HEALTH_COLUMNS = ["id", "date_time", "type", "value", "location", "systolic", "diastolic", "heart_rate", "note"];
 const HEX_COLOR_REGEX = /^#([0-9a-fA-F]{6})$/;
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "gonsakon";
@@ -842,7 +842,14 @@ app.get("/api/health", requireAuth, async (req, res) => {
       return res.json({ data: [] });
     }
 
-    const health = normalizeRows(rawValues);
+    const health = normalizeRows(rawValues).map(record => {
+      // 確保每個記錄都有完整的欄位，包括 note
+      const completeRecord = {};
+      HEALTH_COLUMNS.forEach(column => {
+        completeRecord[column] = record[column] || "";
+      });
+      return completeRecord;
+    });
     res.json({ data: health });
   } catch (error) {
     console.error("Failed to fetch health records:", error);
@@ -916,26 +923,6 @@ app.post("/api/health", requireAuth, async (req, res) => {
             values: [HEALTH_COLUMNS],
           },
         });
-      } else {
-        // 表格存在，檢查是否有 note 列
-        const headers = checkResponse.data.values[0] || [];
-        if (!headers.includes("note")) {
-          // 如果沒有 note 列，則添加它
-          console.log("Adding 'note' column to health sheet");
-          // 更新標題列以包含 note
-          const updatedHeaders = [...headers];
-          while (updatedHeaders.length < HEALTH_COLUMNS.length) {
-            updatedHeaders.push(HEALTH_COLUMNS[updatedHeaders.length]);
-          }
-          await sheets.spreadsheets.values.update({
-            spreadsheetId: SHEET_ID,
-            range: HEALTH_SHEET_RANGE,
-            valueInputOption: "RAW",
-            requestBody: {
-              values: [updatedHeaders],
-            },
-          });
-        }
       }
     } catch (checkError) {
       // 表格不存在，創建新工作表和標題列
