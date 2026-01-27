@@ -39,6 +39,8 @@ const DEFAULT_BUDGET = {
   id: "1",
   amount: "0",
 };
+const HEALTH_SHEET_RANGE = process.env.GOOGLE_HEALTH_RANGE || "'health'!A:H";
+const HEALTH_COLUMNS = ["id", "date_time", "type", "value", "location", "systolic", "diastolic", "heart_rate", "note"];
 const HEX_COLOR_REGEX = /^#([0-9a-fA-F]{6})$/;
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "gonsakon";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "!Nba1q2w3e4r";
@@ -60,6 +62,8 @@ const API_ENDPOINTS = [
   { method: "DELETE", path: "/api/categories/:id", description: "刪除類別" },
   { method: "GET", path: "/api/budget", description: "取得預算" },
   { method: "PUT", path: "/api/budget", description: "更新預算" },
+  { method: "GET", path: "/api/health", description: "取得所有健康監測記錄" },
+  { method: "POST", path: "/api/health", description: "新增健康監測記錄（血糖或血壓）" },
 ];
 
 /**
@@ -264,6 +268,17 @@ const initializeBudgetSheet = async (sheets) => {
         BUDGET_COLUMNS,
         BUDGET_COLUMNS.map((key) => DEFAULT_BUDGET[key] || ""),
       ],
+    },
+  });
+};
+
+const initializeHealthSheet = async (sheets) => {
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SHEET_ID,
+    range: HEALTH_SHEET_RANGE,
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [HEALTH_COLUMNS],
     },
   });
 };
@@ -775,6 +790,132 @@ app.put("/api/budget", requireAuth, async (req, res) => {
   } catch (error) {
     console.error("Failed to update budget:", error);
     res.status(500).json({ message: "無法更新預算", error: error.message });
+  }
+});
+
+// ===== Health Monitoring API =====
+
+// GET /api/health - 取得所有健康監測記錄
+app.get("/api/health", requireAuth, async (req, res) => {
+  try {
+    const sheets = getSheetsClient();
+    const response = await sheets.spreadsheets.values
+      .get({
+        spreadsheetId: SHEET_ID,
+        range: HEALTH_SHEET_RANGE,
+      })
+      .catch((error) => {
+        if (error.code === 400 || error.code === 404) {
+          return { data: { values: [] } };
+        }
+        throw error;
+      });
+
+    const rawValues = response.data.values || [];
+    if (rawValues.length === 0) {
+      return res.json({ data: [] });
+    }
+
+    const health = normalizeRows(rawValues);
+    res.json({ data: health });
+  } catch (error) {
+    console.error("Failed to fetch health records:", error);
+    res.status(500).json({ message: "無法讀取健康監測記錄", error: error.message });
+  }
+});
+
+// POST /api/health - 新增健康監測記錄（血糖或血壓）
+app.post("/api/health", requireAuth, async (req, res) => {
+  try {
+    const { type, date_time, value, location, systolic, diastolic, heart_rate, note } = req.body;
+
+    if (!type || !["blood_sugar", "blood_pressure"].includes(type)) {
+      return res.status(400).json({ message: "無效的健康監測類型" });
+    }
+
+    if (!date_time) {
+      return res.status(400).json({ message: "請提供記錄時間" });
+    }
+
+    const sheets = getSheetsClient();
+    const id = `health-${Date.now()}`;
+    let payload;
+
+    if (type === "blood_sugar") {
+      if (typeof value === "undefined" || value === null) {
+        return res.status(400).json({ message: "請提供血糖值" });
+      }
+      payload = {
+        id,
+        date_time,
+        type,
+        value: String(value),
+        location: location || "",
+        systolic: "",
+        diastolic: "",
+        heart_rate: "",
+        note: note || "",
+      };
+    } else if (type === "blood_pressure") {
+      if (typeof systolic === "undefined" || typeof diastolic === "undefined") {
+        return res.status(400).json({ message: "請提供收縮壓和舒張壓" });
+      }
+      payload = {
+        id,
+        date_time,
+        type,
+        value: "",
+        location: "",
+        systolic: String(systolic),
+        diastolic: String(diastolic),
+        heart_rate: heart_rate ? String(heart_rate) : "",
+        note: note || "",
+      };
+    }
+
+    // 檢查健康工作表是否存在，不存在則初始化
+    try {
+      const checkResponse = await sheets.spreadsheets.values.get({
+        spreadsheetId: SHEET_ID,
+        range: HEALTH_SHEET_RANGE,
+      });
+      
+      if (!checkResponse.data.values || checkResponse.data.values.length === 0) {
+        // 表格為空，新增標題列
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SHEET_ID,
+          range: HEALTH_SHEET_RANGE,
+          valueInputOption: "RAW",
+          requestBody: {
+            values: [HEALTH_COLUMNS],
+          },
+        });
+      }
+    } catch (checkError) {
+      // 表格不存在，創建新工作表和標題列
+      if (checkError.code === 400 || checkError.code === 404) {
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SHEET_ID,
+          range: HEALTH_SHEET_RANGE,
+          valueInputOption: "RAW",
+          requestBody: {
+            values: [HEALTH_COLUMNS],
+          },
+        });
+      } else {
+        throw checkError;
+      }
+    }
+
+    await appendRow(sheets, HEALTH_SHEET_RANGE, HEALTH_COLUMNS, payload);
+
+    res.status(201).json({ 
+      message: "健康監測記錄已保存", 
+      data: payload 
+    });
+  } catch (error) {
+    console.error("Failed to create health record:", error);
+    res.status(500).json({ message: "無法保存健康監測記錄", error: error.message });
   }
 });
 
