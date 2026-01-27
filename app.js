@@ -916,6 +916,26 @@ app.post("/api/health", requireAuth, async (req, res) => {
             values: [HEALTH_COLUMNS],
           },
         });
+      } else {
+        // 表格存在，檢查是否有 note 列
+        const headers = checkResponse.data.values[0] || [];
+        if (!headers.includes("note")) {
+          // 如果沒有 note 列，則添加它
+          console.log("Adding 'note' column to health sheet");
+          // 更新標題列以包含 note
+          const updatedHeaders = [...headers];
+          while (updatedHeaders.length < HEALTH_COLUMNS.length) {
+            updatedHeaders.push(HEALTH_COLUMNS[updatedHeaders.length]);
+          }
+          await sheets.spreadsheets.values.update({
+            spreadsheetId: SHEET_ID,
+            range: HEALTH_SHEET_RANGE,
+            valueInputOption: "RAW",
+            requestBody: {
+              values: [updatedHeaders],
+            },
+          });
+        }
       }
     } catch (checkError) {
       // 表格不存在，創建新工作表和標題列
