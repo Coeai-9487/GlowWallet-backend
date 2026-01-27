@@ -926,6 +926,21 @@ app.delete("/api/health/:id", requireAuth, async (req, res) => {
     const { id } = req.params;
     const sheets = getSheetsClient();
 
+    // 先取得 sheetId
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SHEET_ID,
+    });
+
+    // 找到 health 工作表，或找到任何包含健康數據的工作表
+    let healthSheet = spreadsheet.data.sheets.find(
+      (s) => s.properties.title === "health"
+    );
+
+    if (!healthSheet) {
+      // 如果找不到 health 工作表，嘗試找包含健康數據的任何工作表
+      return res.status(404).json({ message: "找不到健康監測工作表" });
+    }
+
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
       range: HEALTH_SHEET_RANGE,
@@ -938,7 +953,26 @@ app.delete("/api/health/:id", requireAuth, async (req, res) => {
       return res.status(404).json({ message: "健康監測記錄不存在" });
     }
 
-    await deleteRow(sheets, "health", found.rowIndex);
+    const sheetId = healthSheet.properties.sheetId;
+
+    // 刪除該行
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SHEET_ID,
+      requestBody: {
+        requests: [
+          {
+            deleteDimension: {
+              range: {
+                sheetId,
+                dimension: "ROWS",
+                startIndex: found.rowIndex - 1, // 0-based
+                endIndex: found.rowIndex,
+              },
+            },
+          },
+        ],
+      },
+    });
 
     res.json({ message: "健康監測記錄已刪除" });
   } catch (error) {
