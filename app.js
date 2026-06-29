@@ -952,6 +952,73 @@ app.post("/api/health", requireAuth, async (req, res) => {
   }
 });
 
+// PUT /api/health/:id - 編輯健康監測記錄
+app.put("/api/health/:id", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { type, date_time, value, location, systolic, diastolic, heart_rate, note } = req.body;
+    const sheets = getSheetsClient();
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SHEET_ID,
+      range: HEALTH_SHEET_RANGE,
+    });
+
+    const rawValues = response.data.values || [];
+    const found = findRowByIDInData(rawValues, id, HEALTH_COLUMNS);
+
+    if (!found) {
+      return res.status(404).json({ message: "健康監測記錄不存在" });
+    }
+
+    let payload;
+
+    if (type === "blood_sugar") {
+      if (typeof value === "undefined" || value === null) {
+        return res.status(400).json({ message: "請提供血糖值" });
+      }
+      payload = {
+        id,
+        date_time: date_time || "",
+        type,
+        value: String(value),
+        location: location || "",
+        systolic: "",
+        diastolic: "",
+        heart_rate: "",
+        note: note || "",
+      };
+    } else if (type === "blood_pressure") {
+      if (typeof systolic === "undefined" || typeof diastolic === "undefined") {
+        return res.status(400).json({ message: "請提供收縮壓和舒張壓" });
+      }
+      payload = {
+        id,
+        date_time: date_time || "",
+        type,
+        value: "",
+        location: "",
+        systolic: String(systolic),
+        diastolic: String(diastolic),
+        heart_rate: heart_rate ? String(heart_rate) : "",
+        note: note || "",
+      };
+    } else {
+      return res.status(400).json({ message: "無效的健康監測類型" });
+    }
+
+    await updateRow("health", found.rowIndex, HEALTH_COLUMNS, payload);
+
+    res.json({ 
+      message: "健康監測記錄已更新", 
+      data: payload 
+    });
+  } catch (error) {
+    console.error("Failed to update health record:", error);
+    res.status(500).json({ message: "無法更新健康監測記錄", error: error.message });
+  }
+});
+
 // DELETE /api/health/:id - 刪除健康監測記錄
 app.delete("/api/health/:id", requireAuth, async (req, res) => {
   try {
